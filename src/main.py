@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Ensure project root is on sys.path when running as a script
+BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 from core.parser import Parser
 
