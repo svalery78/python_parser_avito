@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg-info/
+.build/
+.dist/
+build/
+dist/
+.eggs/
+.venv/
+venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+.ruff_cache/
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Env & secrets
+.env
+.env.*
+
+# Project specific
+logs/
+!logs/.gitignore
+trash/
+!trash/.gitkeep
+config/cookie.json
+
+# Playwright
+playwright-report/
+blob-report/
+

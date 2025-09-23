@@ -1,0 +1,14 @@
+requests
+httpx
+beautifulsoup4
+lxml
+SQLAlchemy
+alembic
+pydantic
+python-dotenv
+loguru
+tenacity
+curl-cffi
+playwright
+playwright-stealth
+googlesearch-python
