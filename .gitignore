@@ -40,4 +40,3 @@ config/cookie.json
 # Playwright
 playwright-report/
 blob-report/
-
