@@ -22,6 +22,8 @@ class ListingProcessor:
             List of dictionaries with extracted listing data
         """
         listings = []
+        # Keep reference to whole-page soup for meta fallbacks
+        self._page_soup = soup
         
         # Find all listing containers
         # Try different selectors for listing items
@@ -44,6 +46,8 @@ class ListingProcessor:
             return listings
         
         print(f"Found {len(listing_containers)} listing containers")
+        # Store listing count for description fallback logic
+        self._listing_count = len(listing_containers)
         
         for container in listing_containers:
             try:
@@ -238,6 +242,18 @@ class ListingProcessor:
 
     def _extract_description_from_container(self, container) -> Optional[str]:
         """Extract description from container."""
+        # 1) Prefer container-level meta descriptions (unique per item on index page)
+        meta_in_container = (
+            container.select_one('meta[itemprop="description"]')
+            or container.select_one('meta[name="description"]')
+            or container.select_one('meta[property="og:description"]')
+        )
+        if meta_in_container and meta_in_container.get("content"):
+            meta_text = meta_in_container.get("content", "").strip()
+            if meta_text:
+                return re.sub(r'\s+', ' ', meta_text)
+
+        # 2) Try visible description blocks inside the container
         selectors = [
             '[data-marker="item-description"]',
             '.iva-item-text-_s_vH',
@@ -252,7 +268,20 @@ class ListingProcessor:
                     # Clean up excessive whitespace
                     desc_text = re.sub(r'\s+', ' ', desc_text)
                     return desc_text
-        
+        # 3) Fallback to page-level meta ONLY if this is a detail page (single listing)
+        try:
+            if getattr(self, "_listing_count", None) == 1:
+                page_soup = getattr(self, "_page_soup", None)
+                if page_soup is not None:
+                    meta = page_soup.select_one('meta[itemprop="description"]') or page_soup.select_one('meta[name="description"]')
+                    if meta and meta.get("content"):
+                        meta_text = meta.get("content", "").strip()
+                        if meta_text:
+                            meta_text = re.sub(r'\s+', ' ', meta_text)
+                            return meta_text
+        except Exception:
+            pass
+
         return None
 
     def _extract_images_from_container(self, container, base_url: str) -> List[str]:
