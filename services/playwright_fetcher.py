@@ -23,7 +23,12 @@ class PlaywrightFetcher:
 
     def __init__(self, headless: bool = True, base_url: Optional[str] = None) -> None:
         env_headful = os.getenv("PW_HEADFUL", "0").lower() in {"1", "true", "yes"}
-        self.headless = False if env_headful else headless
+        # Prefer explicit headless unless user requested headful AND DISPLAY is available
+        if env_headful and os.getenv("DISPLAY"):
+            self.headless = False
+        else:
+            # Force headless when no DISPLAY (e.g., docker without Xvfb)
+            self.headless = True
         self.base_url = base_url.rstrip("/") if base_url else None
         self.headers_builder = HeadersBuilder()
 
@@ -65,8 +70,10 @@ class PlaywrightFetcher:
             except Exception:
                 proxy = None
 
+        # Force headless if no DISPLAY is present (e.g., docker without X server)
+        effective_headless = True if not os.getenv("DISPLAY") else self.headless
         browser = await pw.chromium.launch(
-            headless=self.headless,
+            headless=effective_headless,
             proxy=proxy,
             args=[
                 "--disable-blink-features=AutomationControlled",
