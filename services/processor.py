@@ -285,42 +285,62 @@ class ListingProcessor:
         return None
 
     def _extract_images_from_container(self, container, base_url: str) -> List[str]:
-        """Extract image URLs from container."""
-        images = []
-        
-        # Try different selectors for images
-        img_selectors = [
-            'img[data-marker="item-photo"]',
-            '.photo-slider-photoSlider-u7UAa img',
-            '.photo-slider-item-mbNB3 img',
-            '.gallery-img-wrapper img',
-            'img',
-        ]
-        
-        for selector in img_selectors:
-            img_elements = container.select(selector)
-            for img in img_elements:
-                src = img.get('src') or img.get('data-src')
+        """Extract first 3 image URLs from the carousel in the listing container."""
+        images: List[str] = []
+
+        # Primary: read from carousel list items, which often encode full URL in data-marker
+        # Example: li[data-marker="slider-image/image-https://..."] > div > img
+        li_nodes = container.select('ul.photo-slider-list-R0jle li.photo-slider-list-item-r2YDC')
+        for li in li_nodes:
+            if len(images) >= 3:
+                break
+            data_marker = li.get('data-marker') or ''
+            if data_marker.startswith('slider-image/image-'):
+                url = data_marker.replace('slider-image/image-', '', 1).strip()
+                if url.startswith('//'):
+                    url = 'https:' + url
+                elif url.startswith('/'):
+                    url = urljoin(base_url, url)
+                if url and url not in images:
+                    images.append(url)
+                    continue
+            # Fallback to the img src inside this li
+            img = li.select_one('img')
+            if img:
+                src = img.get('src') or img.get('data-src') or ''
                 if src:
-                    # Convert relative URLs to absolute
                     if src.startswith('//'):
                         src = 'https:' + src
                     elif src.startswith('/'):
                         src = urljoin(base_url, src)
-                    elif not src.startswith('http'):
-                        src = urljoin(base_url, src)
-                    
-                    # Filter out very small images and icons
                     if any(size in src for size in ['16x16', '24x24', '32x32']) or 'icon' in src.lower():
                         continue
-                    
                     if src not in images:
                         images.append(src)
-            
-            if images:  # If we found images with this selector, use them
-                break
-        
-        return images[:5]  # Limit to first 5 images
+
+        # Secondary: if still fewer than 3, broaden search within the container
+        if len(images) < 3:
+            extras = []
+            for img in container.select('img'):
+                src = img.get('src') or img.get('data-src') or ''
+                if not src:
+                    continue
+                if src.startswith('//'):
+                    src = 'https:' + src
+                elif src.startswith('/'):
+                    src = urljoin(base_url, src)
+                if not src.startswith('http'):
+                    continue
+                if any(size in src for size in ['16x16', '24x24', '32x32']) or 'icon' in src.lower():
+                    continue
+                extras.append(src)
+            for src in extras:
+                if len(images) >= 3:
+                    break
+                if src not in images:
+                    images.append(src)
+
+        return images[:3]
 
     def _extract_link_from_container(self, container, base_url: str) -> Optional[str]:
         """Extract listing link from container."""
