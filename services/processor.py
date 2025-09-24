@@ -42,10 +42,8 @@ class ListingProcessor:
                 break
         
         if not listing_containers:
-            print("No listing containers found")
             return listings
         
-        print(f"Found {len(listing_containers)} listing containers")
         # Store listing count for description fallback logic
         self._listing_count = len(listing_containers)
         
@@ -54,8 +52,7 @@ class ListingProcessor:
                 listing_data = self._extract_single_listing(container, base_url)
                 if listing_data:
                     listings.append(listing_data)
-            except Exception as e:
-                print(f"Error extracting listing: {e}")
+            except Exception:
                 continue
         
         return listings

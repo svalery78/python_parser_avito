@@ -42,5 +42,5 @@ playwright-report/
 blob-report/
 
 # data
-avito_listings.db
+data/avito_listings.db
 

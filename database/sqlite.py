@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, create_engine, select
+from sqlalchemy import Column, Integer, String, Text, DateTime, create_engine, select, and_
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func
 
@@ -105,19 +105,32 @@ def save_multiple_listings(listings: list[dict]) -> int:
         for listing in listings:
             try:
                 images_json = json.dumps(listing.get('images') or [], ensure_ascii=False)
-                session.add(
-                    Listing(
-                        title=listing.get('title'),
-                        price=listing.get('price'),
-                        bail=listing.get('bail'),
-                        tax=listing.get('tax'),
-                        services=listing.get('services'),
-                        address=listing.get('address'),
-                        desc=listing.get('desc'),
-                        images=images_json,
-                        link=listing.get('link', ''),
-                    )
-                )
+                # Deduplicate by all columns except images (title, price, bail, tax, services, address, desc, link)
+                stmt = select(Listing.id).where(and_(
+                    Listing.title == listing.get('title'),
+                    Listing.price == listing.get('price'),
+                    Listing.bail == listing.get('bail'),
+                    Listing.tax == listing.get('tax'),
+                    Listing.services == listing.get('services'),
+                    Listing.address == listing.get('address'),
+                    Listing.desc == listing.get('desc'),
+                    Listing.link == listing.get('link', ''),
+                ))
+                exists = session.execute(stmt).first()
+                if exists:
+                    continue
+
+                session.add(Listing(
+                    title=listing.get('title'),
+                    price=listing.get('price'),
+                    bail=listing.get('bail'),
+                    tax=listing.get('tax'),
+                    services=listing.get('services'),
+                    address=listing.get('address'),
+                    desc=listing.get('desc'),
+                    images=images_json,
+                    link=listing.get('link', ''),
+                ))
                 saved_count += 1
             except Exception as e:
                 print(f"Error saving listing: {e}")
