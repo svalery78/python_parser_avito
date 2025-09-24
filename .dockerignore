@@ -1,0 +1,22 @@
+.venv
+__pycache__
+*.pyc
+.git
+.gitignore
+node_modules
+.DS_Store
+
+# Local data and caches (mounted via volumes at runtime)
+data/*
+!data/.gitkeep
+trash/*
+!trash/.gitkeep
+config/cookie.json
+
+# IDE
+.vscode
+.idea
+
+
+
+

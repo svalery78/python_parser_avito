@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  parser:
+    build: .
+    container_name: avito_parser
+    env_file:
+      - .env
+    environment:
+      # Defaults if not provided in .env
+      USE_PLAYWRIGHT: ${USE_PLAYWRIGHT:-1}
+      PW_HEADFUL: ${PW_HEADFUL:-0}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./trash:/app/trash
+    # For headful debugging you may map shm and use privileged flags
+    # shm_size: '1gb'
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2g
+    command: ["python", "-m", "src.main"]
+
+  parser-xvfb:
+    build: .
+    container_name: avito_parser_xvfb
+    profiles: ["xvfb"]
+    env_file:
+      - .env
+    environment:
+      USE_PLAYWRIGHT: ${USE_PLAYWRIGHT:-1}
+      PW_HEADFUL: 1
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./trash:/app/trash
+    command: ["bash", "-lc", "xvfb-run -a --server-args='-screen 0 1920x1080x24' python -m src.main"]
+
+
