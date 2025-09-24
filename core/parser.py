@@ -8,8 +8,10 @@ from bs4 import BeautifulSoup
 from services.curl_fetcher import CurlCFFIFetcher
 from services.playwright_fetcher import PlaywrightFetcher
 from services.output_dispatcher import OutputDispatcher
+from services.processor import ListingProcessor
 from utils.headers import HeadersBuilder
 from utils.proxy_finder import search_free_proxies
+from database.sqlite import save_multiple_listings
 
 
 class Parser:
@@ -65,9 +67,32 @@ class Parser:
             pass
         (trash_dir / safe_name).write_text(html, encoding='utf-8', errors='ignore')
         soup = BeautifulSoup(html, "lxml")
-        # For now, output full text; later we can structure this
-        text_content = soup.get_text("\n", strip=True)
-        self.dispatcher.dispatch(text_content)
+        
+        # Try to extract multiple listings from the page
+        processor = ListingProcessor()
+        # Extract base URL from the full URL
+        from urllib.parse import urlparse
+        parsed_url = urlparse(path_or_url)
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        listings = processor.extract_listings(soup=soup, base_url=base_url)
+        
+        if listings:
+            # Save all extracted listings to database
+            saved_count = save_multiple_listings(listings)
+            self.dispatcher.dispatch(f"Saved {saved_count} listings from {len(listings)} found")
+            
+            # Print summary of saved listings
+            for i, listing in enumerate(listings[:3]):  # Show first 3
+                title = listing.get('title', 'No title')[:50]
+                price = listing.get('price', 'No price')[:30]
+                self.dispatcher.dispatch(f"  {i+1}. {title} - {price}")
+            
+            if len(listings) > 3:
+                self.dispatcher.dispatch(f"  ... and {len(listings) - 3} more")
+        else:
+            # fallback: dump raw text
+            text_content = soup.get_text("\n", strip=True)
+            self.dispatcher.dispatch(text_content)
 
 
 __all__ = ["Parser"]
