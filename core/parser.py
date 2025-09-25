@@ -52,7 +52,7 @@ class Parser:
                         continue
                 raise
 
-    def parse_and_output(self, path_or_url: str) -> None:
+    def parse_and_output(self, path_or_url: str) -> int:
         html = self.fetch(path_or_url)
         # Save raw HTML to trash for temporary inspection
         base_dir = Path(__file__).resolve().parents[1]
@@ -76,6 +76,7 @@ class Parser:
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         listings = processor.extract_listings(soup=soup, base_url=base_url)
         
+        saved_count = 0 # Initialize saved_count
         if listings:
             # Save all extracted listings to database
             saved_count = save_multiple_listings(listings)
@@ -93,8 +94,8 @@ class Parser:
             # fallback: dump raw text
             text_content = soup.get_text("\n", strip=True)
             self.dispatcher.dispatch(text_content)
+        
+        return saved_count # Return saved_count
 
 
 __all__ = ["Parser"]
-
-

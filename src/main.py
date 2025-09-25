@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from core.parser import Parser
 
 
-def main() -> None:
+def main() -> int:
     load_dotenv()
 
     url = os.getenv("TARGET_URL")
@@ -18,9 +18,8 @@ def main() -> None:
     use_playwright = os.getenv("USE_PLAYWRIGHT", "0").lower() in {"1", "true", "yes"}
 
     parser = Parser(base_url=base_url, use_playwright=use_playwright)
-    parser.parse_and_output(url)
+    return parser.parse_and_output(url)
 
 
 if __name__ == "__main__":
     main()
-
