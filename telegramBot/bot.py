@@ -92,13 +92,29 @@ def format_listing(item: ListingView, idx: int) -> str:
     lines.append(f"Ссылка: {item.link}")
     return "\n".join(lines)
 
-def run_parser_background() -> None:
+def run_parser_background(bot: telebot.TeleBot, chat_id: int) -> None:
+    """Run parser and notify the user about the result."""
     global parser_is_running
     global parser_thread
     try:
         parser_is_running = True
         from src.main import main as run_parser
-        run_parser()
+        new_items_count = run_parser()
+        with SessionLocal() as session:
+            total_count = session.query(Listing).count()
+        
+        kb = types.InlineKeyboardMarkup()
+        kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+        bot.send_message(
+            chat_id,
+            f"\u2705 <b>Парсер завершен успешно!</b>\n\nНовых объектов: {new_items_count}\nВсего в базе: {total_count}",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+    except Exception as e:
+        kb = types.InlineKeyboardMarkup()
+        kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+        bot.send_message(chat_id, f"\u2757 <b>Ошибка парсера:</b> {e}", reply_markup=kb)
     finally:
         parser_is_running = False
         parser_thread = None
@@ -109,7 +125,7 @@ def get_db_statistics() -> str:
         first_listing = session.query(Listing).order_by(Listing.created_at.asc()).first()
         last_listing = session.query(Listing).order_by(Listing.created_at.desc()).first()
 
-        stats_text = f"📊 <b>Статистика базы данных:</b>\n"
+        stats_text = f"\U0001F4CA <b>Статистика базы данных:</b>\n"
         stats_text += f"Общее количество объявлений: {total_listings}\n"
         if first_listing:
             stats_text += f"Самое старое объявление: {first_listing.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -117,6 +133,30 @@ def get_db_statistics() -> str:
             stats_text += f"Самое новое объявление: {last_listing.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
         
         return stats_text
+
+def send_main_menu(bot: telebot.TeleBot, chat_id: int, message_id: Optional[int] = None) -> None:
+    kb = types.InlineKeyboardMarkup()
+    kb.row(types.InlineKeyboardButton("\u25B6\uFE0F Запустить парсер", callback_data="start_parser"))
+    kb.row(types.InlineKeyboardButton("\U0001F5C2 Журнал", callback_data="journal:0"))
+    kb.row(types.InlineKeyboardButton("\U0001F4CA Статистика БД", callback_data="db_stats"))
+    kb.row(types.InlineKeyboardButton("\U0001F50D Поиск объектов", callback_data="search_prompt"))
+    kb.row(types.InlineKeyboardButton("\u2139\uFE0F Статус парсера", callback_data="parser_status"))
+    kb.row(types.InlineKeyboardButton("\u2699\uFE0F Настройки", callback_data="settings"))
+    text = "\U0001F44B <b>Добро пожаловать!</b>\n\nЯ бот для парсинга объявлений с Avito.\nВыберите одно из следующих действий:"
+    if message_id:
+        try:
+            bot.edit_message_text(text, chat_id, message_id, reply_markup=kb, parse_mode="HTML")
+        except telebot.apihelper.ApiTelegramException as e:
+            if 'message is not modified' in e.description:
+                pass # Ignore if message is not modified
+            elif 'there is no text in the message to edit' in e.description:
+                bot.delete_message(chat_id, message_id)
+                bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
+            else:
+                raise
+    else:
+        bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
+
 
 def create_bot() -> telebot.TeleBot:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -127,49 +167,69 @@ def create_bot() -> telebot.TeleBot:
     # Start command
     @bot.message_handler(commands=["start", "help"])
     def handle_start(message: types.Message) -> None:
-        kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add(types.KeyboardButton("▶️ Запустить парсер"))
-        kb.add(types.KeyboardButton("🗂 Журнал"))
-        kb.add(types.KeyboardButton("📊 Статистика БД"))
-        kb.add(types.KeyboardButton("🔍 Поиск объектов"))
-        kb.add(types.KeyboardButton("⚙️ Настройки"))
-        kb.add(types.KeyboardButton("ℹ️ Статус парсера"))
-        bot.send_message(message.chat.id, "Выберите действие:", reply_markup=kb)
+        send_main_menu(bot, message.chat.id)
 
     def search_query_step(message: types.Message) -> None:
         query = message.text
         if not query:
-            bot.send_message(message.chat.id, "Запрос не может быть пустым.")
+            kb = types.InlineKeyboardMarkup()
+            kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+            bot.send_message(message.chat.id, "Запрос не может быть пустым.", reply_markup=kb)
             return
         send_search_results_page(bot, message.chat.id, query, page=0)
 
-    # Text menu
-    @bot.message_handler(func=lambda m: m.text in {"▶️ Запустить парсер", "🗂 Журнал", "⚙️ Настройки", "📊 Статистика БД", "🔍 Поиск объектов", "ℹ️ Статус парсера"})
-    def handle_menu(message: types.Message) -> None:
+    @bot.callback_query_handler(func=lambda c: c.data == "start_parser")
+    def handle_start_parser_cb(call: types.CallbackQuery) -> None:
         global parser_is_running
         global parser_thread
 
-        if message.text == "▶️ Запустить парсер":
-            if parser_is_running and parser_thread and parser_thread.is_alive():
-                bot.send_message(message.chat.id, "Парсер уже запущен.")
-            else:
-                bot.send_message(message.chat.id, "Запускаю парсер...")
-                parser_thread = threading.Thread(target=run_parser_background, daemon=True)
-                parser_thread.start()
-                bot.send_message(message.chat.id, "Парсер запущен. Результаты попадут в базу.")
-        elif message.text == "🗂 Журнал":
-            send_journal_page(bot, message.chat.id, page=0)
-        elif message.text == "📊 Статистика БД":
-            stats = get_db_statistics()
-            bot.send_message(message.chat.id, stats, parse_mode="HTML")
-        elif message.text == "🔍 Поиск объектов":
-            bot.send_message(message.chat.id, "Введите запрос для поиска:")
-            bot.register_next_step_handler(message, search_query_step)
-        elif message.text == "ℹ️ Статус парсера":
-            status_text = "Парсер активен." if parser_is_running and parser_thread and parser_thread.is_alive() else "Парсер неактивен."
-            bot.send_message(message.chat.id, status_text)
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+        if parser_is_running and parser_thread and parser_thread.is_alive():
+            bot.send_message(call.message.chat.id, "Парсер уже запущен.", reply_markup=kb)
         else:
-            bot.send_message(message.chat.id, "Настройки пока в разработке.")
+            bot.send_message(call.message.chat.id, "Запускаю парсер...", reply_markup=kb)
+            parser_thread = threading.Thread(
+                target=run_parser_background,
+                args=(bot, call.message.chat.id),
+                daemon=True
+            )
+            parser_thread.start()
+
+    @bot.callback_query_handler(func=lambda c: c.data == "db_stats")
+    def handle_db_stats_cb(call: types.CallbackQuery) -> None:
+        bot.answer_callback_query(call.id)
+        stats = get_db_statistics()
+        kb = types.InlineKeyboardMarkup()
+        kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+        bot.send_message(call.message.chat.id, stats, parse_mode="HTML", reply_markup=kb)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "search_prompt")
+    def handle_search_prompt_cb(call: types.CallbackQuery) -> None:
+        bot.answer_callback_query(call.id)
+        kb = types.InlineKeyboardMarkup()
+        kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+        bot.send_message(call.message.chat.id, "Введите запрос для поиска:", reply_markup=kb)
+        bot.register_next_step_handler(call.message, search_query_step)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "parser_status")
+    def handle_parser_status_cb(call: types.CallbackQuery) -> None:
+        bot.answer_callback_query(call.id)
+        status_text = "Парсер активен." if parser_is_running and parser_thread and parser_thread.is_alive() else "Парсер неактивен."
+        kb = types.InlineKeyboardMarkup()
+        kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
+        bot.send_message(call.message.chat.id, status_text, reply_markup=kb)
+
+    @bot.callback_query_handler(func=lambda c: c.data == "settings")
+    def handle_settings_cb(call: types.CallbackQuery) -> None:
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "Настройки пока в разработке.")
+
+    @bot.callback_query_handler(func=lambda c: c.data == "main_menu")
+    def handle_main_menu_cb(call: types.CallbackQuery) -> None:
+        bot.answer_callback_query(call.id)
+        send_main_menu(bot, call.message.chat.id, call.message.message_id)
 
     # Callback for journal pagination
     @bot.callback_query_handler(func=lambda c: c.data.startswith("journal:"))
@@ -226,7 +286,10 @@ def create_bot() -> telebot.TeleBot:
                 # Create inline keyboard for the link button and "К списку" button
                 kb_details = types.InlineKeyboardMarkup()
                 kb_details.add(types.InlineKeyboardButton("Ссылка", url=listing.link))
-                kb_details.add(types.InlineKeyboardButton("К списку", callback_data=f"back_to_journal:{journal_page}")) # New button
+                kb_details.row(
+                    types.InlineKeyboardButton("К списку", callback_data=f"back_to_journal:{journal_page}"),
+                    types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu")
+                )
 
                 if image_url:
                     bot.send_photo(call.message.chat.id, image_url, caption=detail_text, parse_mode="HTML", reply_markup=kb_details)
@@ -255,12 +318,11 @@ def create_bot() -> telebot.TeleBot:
 
 def send_journal_page(bot: telebot.TeleBot, chat_id: int, page: int, edit_message: Optional[types.Message] = None) -> None:
     text = "" # Initialize text
-    kb = None # Initialize kb
+    kb = types.InlineKeyboardMarkup()
 
     items, total = fetch_listings_page(page)
     if not items:
         text = "Журнал пуст."
-        # kb remains None
     else:
         start_range = page * PAGE_SIZE + 1
         end_range = min((page + 1) * PAGE_SIZE, total)
@@ -281,20 +343,19 @@ def send_journal_page(bot: telebot.TeleBot, chat_id: int, page: int, edit_messag
                 button_text += f" - {it.price}"
             listing_buttons.append(types.InlineKeyboardButton(button_text, callback_data=f"details:{it.id}:{page}")) # Brief description for button
 
-        # Pagination inline keyboard
-        kb = types.InlineKeyboardMarkup()
-        
         # Add listing buttons as separate rows (now before pagination)
         for btn in listing_buttons:
             kb.row(btn)
 
         buttons = []
         if page > 0:
-            buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"journal:{page-1}"))
+            buttons.append(types.InlineKeyboardButton("\u2B05\uFE0F Назад", callback_data=f"journal:{page-1}"))
         if (page + 1) * PAGE_SIZE < total:
-            buttons.append(types.InlineKeyboardButton("Далее ➡️", callback_data=f"journal:{page+1}"))
+            buttons.append(types.InlineKeyboardButton("Далее \u27A1\uFE0F", callback_data=f"journal:{page+1}"))
         if buttons:
             kb.row(*buttons) # Add pagination buttons as a row
+
+    kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
 
     if edit_message:
         bot.edit_message_text(text, chat_id=chat_id, message_id=edit_message.message_id, reply_markup=kb, disable_web_page_preview=True)
@@ -303,6 +364,7 @@ def send_journal_page(bot: telebot.TeleBot, chat_id: int, page: int, edit_messag
 
 def send_search_results_page(bot: telebot.TeleBot, chat_id: int, query: str, page: int, edit_message: Optional[types.Message] = None) -> None:
     items, total = fetch_listings_by_query(query, page)
+    kb = types.InlineKeyboardMarkup()
     if not items:
         text = f"По запросу \'{query}\' ничего не найдено."
     else:
@@ -312,15 +374,16 @@ def send_search_results_page(bot: telebot.TeleBot, chat_id: int, query: str, pag
             lines.append(format_listing(it, i))
         text = "\n".join(lines)
 
-    # Pagination inline keyboard
-    kb = types.InlineKeyboardMarkup()
-    buttons = []
-    if page > 0:
-        buttons.append(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"search:{query}:{page-1}"))
-    if (page + 1) * PAGE_SIZE < total:
-        buttons.append(types.InlineKeyboardButton("Вперед ➡️", callback_data=f"search:{query}:{page+1}"))
-    if buttons:
-        kb.row(*buttons)
+        # Pagination inline keyboard
+        buttons = []
+        if page > 0:
+            buttons.append(types.InlineKeyboardButton("\u2B05\uFE0F Назад", callback_data=f"search:{query}:{page-1}"))
+        if (page + 1) * PAGE_SIZE < total:
+            buttons.append(types.InlineKeyboardButton("Вперед \u27A1\uFE0F", callback_data=f"search:{query}:{page+1}"))
+        if buttons:
+            kb.row(*buttons)
+
+    kb.row(types.InlineKeyboardButton("\U0001F3E0 Меню", callback_data="main_menu"))
 
     if edit_message:
         bot.edit_message_text(text, chat_id=chat_id, message_id=edit_message.message_id, reply_markup=kb, disable_web_page_preview=True)
